@@ -275,7 +275,7 @@
       `<div class="wc-row pot"><span class="wc-amt">◌ ${esc(o.potAmt)} — depends on you</span><span class="wc-sub">${esc(o.potSub)}</span></div></div>`,
 
     question: (o) =>
-      `<div class="w w-q"><div class="wq-label">${esc(o.n)} OF ${esc(o.of)}${o.unlocks ? " · UNLOCKS " + esc(o.unlocks) : ""}</div>` +
+      `<div class="w w-q"><div class="wq-label">${o.label ? esc(o.label) : esc(o.n) + " OF " + esc(o.of) + (o.unlocks ? " · UNLOCKS " + esc(o.unlocks) : "")}</div>` +
       `<div class="wq-q">${esc(o.q)}</div>` +
       (o.opts ? `<div class="wq-chips">${o.opts.map((l, i) => `<button type="button" class="chip wq-chip" data-i="${i}">${esc(l)}</button>`).join("")}</div>` : "") +
       (o.skip ? `<button type="button" class="wq-skip-btn">${esc(o.skip)}</button>` : "") + `</div>`,
@@ -352,6 +352,16 @@
           `<span class="wm-chev">›</span></button>`;
       }).join("") + `</div>`;
     },
+
+    uncertainList: (items) =>
+      `<div class="w w-moves">` + items.map((u) => {
+        const q = UNCERTAIN_META[u.strategy];
+        return `<button type="button" class="wm-card wm-uncertain" data-strategy="${esc(u.strategy)}">` +
+          `<span class="wm-body"><span class="wm-name">${esc(SHORT[u.strategy] || u.strategy)}</span>` +
+          `<span class="wm-amt wm-amt-muted">Sized by one answer</span>` +
+          `<span class="wm-val">${esc(q ? q.tease : u.context_needed)}</span></span>` +
+          `<span class="wm-chev">›</span></button>`;
+      }).join("") + `</div>`,
 
     moveCard: (o) =>
       `<div class="w w-move"><div class="wmv-k">${esc(o.k)}</div><div class="wmv-h">${esc(o.h)}</div><div class="wmv-s">${esc(o.s)}</div></div>`,
@@ -482,6 +492,86 @@
     });
   }
 
+  const UNCERTAIN_META = {
+    "hire-your-kid": {
+      tease: "If you have kids at home doing real work, wages shift income to their 0% rate.",
+      q: "Do you have kids at home? If so, what ages?",
+      opts: [["Yes, 7–17", "kids_7_17"], ["Yes, younger", "kids_under_7"], ["Yes, 18+", "kids_18_plus"], ["No kids", "none"]],
+    },
+  };
+
+  function unresolvedUncertain() {
+    const list = (D.analysis && D.analysis.needs_context) || [];
+    return list.filter((u) => {
+      if (u.strategy === "hire-your-kid") return !learned.household_kids || learned.household_kids === "unsure";
+      return true;
+    });
+  }
+
+  function askUncertain(id) {
+    const meta = UNCERTAIN_META[id];
+    if (!meta) return;
+    addTurn({
+      widget: W.question({ label: "SIZED BY ONE ANSWER", q: meta.q, opts: meta.opts.map((o) => o[0]), skip: "Skip this one" }),
+      delay: 500,
+      wire: (el) => {
+        const card = el.querySelector(".w-q");
+        const done = (val, btn) => {
+          if (!card || card.classList.contains("answered")) return;
+          card.classList.add("answered");
+          card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+          if (btn) btn.classList.add("selected");
+          answerUncertain(id, val);
+        };
+        el.querySelectorAll(".wq-chip").forEach((btn) =>
+          btn.addEventListener("click", () => done(meta.opts[Number(btn.dataset.i)][1], btn)));
+        const sk = el.querySelector(".wq-skip-btn");
+        if (sk) sk.addEventListener("click", () => done(null, sk));
+      },
+    });
+  }
+
+  function answerUncertain(id, val) {
+    if (id !== "hire-your-kid") return;
+    learned.household_kids = val;
+    const k = D.hire_kid_per_kid;
+    if (val === "kids_7_17" && k) {
+      addTurn({
+        status: "Pay your kids · now sized",
+        preVoice: "Then this move is real for you. Here's the ballpark:",
+        widget: W.compare({
+          beforeLabel: "PER KID, PER YEAR", before: exact(k.low_wage) + "–" + exact(k.high_wage), beforeSub: "real wages for real work",
+          afterLabel: "SHIFTS TO THEIR 0%", after: "~" + friendly(k.low) + "–" + friendly(k.high), afterSub: "off your tax, per kid",
+        }),
+        voice: "The work must be real and the wage defensible — an expert sets up payroll and records.",
+        delay: 800,
+        chips: [
+          ["Book an expert", () => openExpertFlow({
+            topic: "Hire my kids in the business — payroll + documentation setup",
+            onBooked: (method) => addTurn({
+              status: "Expert request sent",
+              voice: "Done — the expert gets your numbers and sets it up so the deduction holds.",
+              delay: 500,
+              chips: backChips("hire-your-kid").concat([["View summary", showReceipt]]),
+            }),
+          })],
+          ["Remind me later", () => remindLater("hire-your-kid")],
+          ["Something different", () => somethingDifferent("hire-your-kid")],
+        ],
+      });
+    } else if (val === null || val === "unsure") {
+      addTurn({ voice: "No problem — it stays on the maybe list. Ask me anytime.", delay: 400, chips: planChips() });
+    } else {
+      addTurn({
+        voice: val === "none"
+          ? "Then this one stays off your plan — you're not missing anything."
+          : "Under 7 or over 17 doesn't qualify for the setup that makes this work — so it stays off, and you're not missing anything.",
+        delay: 500,
+        chips: planChips(),
+      });
+    }
+  }
+
   function introPlanTurn(liveChipLabels) {
     queue = queue.then(() => { $("analysis-label").hidden = false; renderHub(); revealPlanCard(); });
     const lean = INTRO_VARIANT === "lean";
@@ -502,6 +592,24 @@
         }));
       } : null,
     });
+    // Uncertain moves (next-year-review skill): sized by one answer each —
+    // presented after the Found list, never blended into it.
+    const uncertain = unresolvedUncertain().filter((u) => UNCERTAIN_META[u.strategy]);
+    if (uncertain.length) {
+      addTurn({
+        preVoice: "One more might apply — it takes a single answer to know:",
+        widget: W.uncertainList(uncertain),
+        delay: 900,
+        wire: (el) => {
+          el.querySelectorAll(".wm-uncertain").forEach((card) => card.addEventListener("click", () => {
+            const id = card.dataset.strategy;
+            if (LIVE) { liveAsk(`Does ${SHORT[id] || id} apply to me?`); return; }
+            addUser(SHORT[id] || id);
+            askUncertain(id);
+          }));
+        },
+      });
+    }
     if (liveChipLabels) queue = queue.then(() => setLiveChips(liveChipLabels));
   }
 

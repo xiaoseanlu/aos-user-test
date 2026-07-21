@@ -456,3 +456,7 @@ a { color: var(--link); }
 
 /* chat top bar title (replaces INTUIT wordmark) */
 .intuit-word.chat-title { color: var(--text-primary); font-size: 15px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+
+/* uncertain move cards (sized by one answer) */
+.wm-card.wm-uncertain { border-style: dashed; }
+.wm-amt-muted { color: var(--text-secondary) !important; font-weight: 600 !important; font-size: 12.5px !important; }
