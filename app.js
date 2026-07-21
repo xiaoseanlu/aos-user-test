@@ -119,7 +119,7 @@
       const btn = document.createElement("button");
       btn.className = "plan-row";
       btn.type = "button";
-      const status = p.status === "accepted" ? '<span class="pr-status accepted">ACCEPTED</span>'
+      const status = p.status === "accepted" ? '<span class="pr-status accepted">CONFIRMED</span>'
         : p.status === "skipped" ? '<span class="pr-status skipped">ON THE TABLE</span>' : "";
       btn.innerHTML = `<span class="pr-left"><span class="pr-ico">${ICONS[p.id] || "•"}</span>${SHORT[p.id] || p.label}</span>
         <span class="pr-right">${status}${rowValue(p)}</span>`;
@@ -325,7 +325,7 @@
           title: SHORT["quarterly-estimates"],
           amount: friendly(x.action_amount) + " due " + mdy(x.deadline),
           body: `Last April cost you ${exact(CUST.penalty)} in penalty. Paying ${friendly(x.action_amount)} by ${mdy(x.deadline)} keeps that from repeating.`,
-          eff: "5 MIN",
+          eff: "EXPERT CALL",
         }),
         "deduction-optimization": (x) => ({
           title: SHORT["deduction-optimization"],
@@ -1019,7 +1019,7 @@
       const btn = document.createElement("button");
       btn.className = "plan-row";
       btn.type = "button";
-      const status = s.status === "accepted" ? '<span class="pr-status accepted">ACCEPTED</span>'
+      const status = s.status === "accepted" ? '<span class="pr-status accepted">CONFIRMED</span>'
         : s.status === "skipped" ? '<span class="pr-status skipped">ON THE TABLE</span>' : "";
       btn.innerHTML = `<span class="pr-left"><span class="pr-ico">${ICONS[s.id] || "•"}</span>${short}</span>
         <span class="pr-right">${status}${rowValueServer(s)}</span>`;
@@ -1264,10 +1264,11 @@
   }
 
   function acceptSCorp() {
+    // Confirm-to-plan at the yes (skill Step 3); booking completion = done.
+    setStatus("s-corp-election", "accepted", "expert to run reasonable comp + 2027 election");
     openExpertFlow({
       topic: "S-Corp election — reasonable comp analysis + 2027 paperwork",
       onBooked: (method) => {
-        setStatus("s-corp-election", "accepted", `expert ${method} booked — reasonable comp + 2027 election`);
         addTurn({
           status: "Expert request sent · plan updated",
           voice: "Done — your S-Corp numbers went with the request. Nothing files without your sign-off.",
@@ -1311,12 +1312,12 @@
       widget: W.compare({
         beforeLabel: "SKIP IT", before: exact(CUST.penalty) + "+", beforeSub: "penalty again next April",
         afterLabel: `PAY BY ${mdy(s.deadline).toUpperCase()}`, after: friendly(s.action_amount), afterSub: "penalty-proof, whatever income does",
-        note: "Keyed to last year's tax · five minutes on IRS Direct Pay",
+        note: "Keyed to last year's tax · an expert executes it with your sign-off",
         math: s.math,
       }),
       voice: "Q1 and Q2 are paid on time. This is the sure thing — it locks in when you pay.",
       chips: [
-        ["Pay & set a reminder", () => acceptQuarterly(s.action_amount, s.deadline)],
+        ["Have an expert handle it", () => acceptQuarterly(s.action_amount, s.deadline)],
         ["My income changed", askIncome],
         ["Remind me later", () => remindLater("quarterly-estimates")],
         ["Something different", () => somethingDifferent("quarterly-estimates")],
@@ -1325,14 +1326,24 @@
   }
 
   function acceptQuarterly(amount, deadline) {
-    const remind = new Date(deadline + "T12:00:00");
-    remind.setDate(remind.getDate() - 7);
-    const rd = remind.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const p = plan.find((x) => x.id === "quarterly-estimates");
-    p.action = amount;
-    setStatus("quarterly-estimates", "accepted", `${exact(amount)} due ${mdy(deadline)} — reminder set for ${rd}`);
-    addAgent(`Set. **${friendly(amount)} due ${mdy(deadline)}**, reminder on **${rd}**, paid via IRS Direct Pay. You're penalty-proof for the quarter.`);
-    setChips(backChips("quarterly-estimates").concat([["View summary", showReceipt]]));
+    // Confirm-to-plan happens the moment they say yes (skill Step 3)…
+    setStatus("quarterly-estimates", "accepted", `${exact(amount)} due ${mdy(deadline)} — expert to execute`);
+    // …the expert door is the execution (skill Step 5): payment runs through
+    // the expert with the customer's sign-off. No self-serve payment tool.
+    openExpertFlow({
+      topic: `Q3 estimated payment — ${friendly(amount)} by ${mdy(deadline)}`,
+      onBooked: (method) => {
+        const remind = new Date(deadline + "T12:00:00");
+        remind.setDate(remind.getDate() - 7);
+        const rd = remind.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        addTurn({
+          status: "Confirmed on your plan · expert executes",
+          voice: `Set. The expert gets ${friendly(amount)} due ${mdy(deadline)} — nothing moves without your sign-off. Reminder on ${rd}. You're penalty-proof for the quarter.`,
+          delay: 500,
+          chips: backChips("quarterly-estimates").concat([["View summary", showReceipt]]),
+        });
+      },
+    });
   }
 
   function askIncome() {
@@ -1405,10 +1416,11 @@
       }),
       voice: "The work has to be real and the wage defensible. Timesheets and a payroll record make it hold up — worth an expert to set up cleanly.",
       chips: [
-        ["Book an expert", () => openExpertFlow({
+        ["Book an expert", () => {
+          setStatus("hire-your-kid", "accepted", "expert to set up child payroll + documentation");
+          openExpertFlow({
           topic: "Hire my kids in the business — payroll + documentation setup",
           onBooked: (method) => {
-            setStatus("hire-your-kid", "accepted", `expert ${method} booked — child payroll + documentation`);
             addTurn({
               status: "Expert request sent · plan updated",
               voice: "Done — the expert gets your numbers and sets the payroll up so the deduction holds.",
@@ -1416,7 +1428,8 @@
               chips: backChips("hire-your-kid").concat([["View summary", showReceipt]]),
             });
           },
-        })],
+          });
+        }],
         ["Remind me later", () => remindLater("hire-your-kid")],
         ["Something different", () => somethingDifferent("hire-your-kid")],
       ],
